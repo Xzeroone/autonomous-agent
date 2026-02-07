@@ -4,8 +4,8 @@ Production-Ready Autonomous Self-Improving Agent
 Built with Ollama + LangGraph on Ubuntu 24.04
 
 ARCHITECTURE MODES:
-- llm-central-mode (default): LLM as brain/controller, LangGraph as coordination tool
-- graph-mode: LangGraph orchestrates fixed workflow (legacy mode)
+- llm-central (default): LLM as brain/controller, LangGraph as coordination tool
+- graph: LangGraph orchestrates fixed workflow (legacy mode)
 
 Features:
 - LLM-driven autonomous decision-making
@@ -108,7 +108,11 @@ class PersistentMemory:
             return json.load(f)
     
     def _write(self, data: dict):
-        """Internal write with versioning."""
+        """Internal write with versioning.
+        
+        Increments version on each write to track changes.
+        Initial data with version=0 becomes version=1 on first write.
+        """
         data["version"] = data.get("version", 0) + 1
         data["updated_at"] = datetime.now().isoformat()
         with open(self.memory_path, 'w') as f:
@@ -629,8 +633,16 @@ PARAMS: {{}}
         
         except Exception as e:
             # Fallback: default action based on iteration
-            print(f"⚠️  Failed to parse LLM decision: {e}")
+            error_msg = f"Failed to parse LLM decision: {e}"
+            print(f"⚠️  {error_msg}")
             print(f"Response: {content[:200]}...")
+            
+            # Log parse failure to memory for debugging
+            self.memory.log_failure(
+                skill="llm_controller",
+                error=error_msg,
+                code_snippet=content[:500]
+            )
             
             # Default to planning if no code exists yet
             return {
