@@ -19,6 +19,13 @@ from autonomous_agent import (
     PersistentMemory,
     PythonExecutor,
     SafetyEnforcer,
+    AutonomousAgent,
+    PlanTool,
+    WriteTool,
+    TestTool,
+    AnalyzeTool,
+    MemoryTool,
+    LLMController,
 )
 
 
@@ -92,11 +99,10 @@ def test_persistent_memory():
     print("TEST: Persistent Memory")
     print("="*70)
     
-    # Use temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        temp_path = Path(f.name)
-    
-    try:
+    # Use temporary directory
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir) / "test_memory.json"
+        
         memory = PersistentMemory(temp_path)
         
         # Test 1: Initial state
@@ -148,18 +154,20 @@ def test_persistent_memory():
         assert len(failures) == 2, "Should get skill-specific failures"
         print("✓ Retrieves relevant failures")
         
+        # Refresh data after all operations
+        data = memory.read()
+        
         # Test 8: Persistence across instances
         memory2 = PersistentMemory(temp_path)
         data2 = memory2.read()
-        assert data2['version'] == data['version'], "Should persist across instances"
-        assert len(data2['skills']) == len(data['skills'])
+        # Debug: print actual values
+        if data2['version'] != data['version']:
+            print(f"DEBUG: data['version']={data['version']}, data2['version']={data2['version']}")
+        assert data2['version'] == data['version'], f"Should persist across instances (v1={data['version']}, v2={data2['version']})"
+        assert len(data2['skills']) == len(data['skills']), f"Skills should persist ({len(data['skills'])} vs {len(data2['skills'])})"
         print("✓ Persists across instances")
         
         print("\n✅ Persistent Memory: ALL TESTS PASSED")
-    
-    finally:
-        # Cleanup
-        temp_path.unlink(missing_ok=True)
 
 
 def test_python_executor():
@@ -227,6 +235,11 @@ def test_workspace_isolation():
     print("TEST: Workspace Isolation")
     print("="*70)
     
+    # Ensure workspace directories exist
+    WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    (WORKSPACE_ROOT / "skills").mkdir(parents=True, exist_ok=True)
+    (WORKSPACE_ROOT / "exec").mkdir(parents=True, exist_ok=True)
+    
     # Test 1: Workspace is within CWD
     cwd = Path.cwd().resolve()
     workspace = WORKSPACE_ROOT
@@ -289,6 +302,139 @@ def test_dangerous_patterns():
     print(f"\n✅ Dangerous Patterns: {passed}/{len(test_cases)} TESTS PASSED")
 
 
+def test_tool_system():
+    """Test the tool system for LLM-central mode."""
+    print("\n" + "="*70)
+    print("TEST: Tool System")
+    print("="*70)
+    
+    # Ensure workspace exists
+    WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    (WORKSPACE_ROOT / "skills").mkdir(parents=True, exist_ok=True)
+    
+    # Create temporary memory
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir) / "test_memory.json"
+        
+        memory = PersistentMemory(temp_path)
+        safety = SafetyEnforcer(WORKSPACE_ROOT)
+        executor = PythonExecutor(WORKSPACE_ROOT, timeout=5)
+        
+        # Test 1: WriteTool
+        write_tool = WriteTool()
+        result = write_tool.execute(
+            skill_name="test_skill",
+            code="print('Hello, World!')"
+        )
+        assert result['success'], f"WriteTool should succeed: {result.get('error', '')}"
+        print("✓ WriteTool works")
+        
+        # Test 2: TestTool
+        test_tool = TestTool(executor, memory)
+        result = test_tool.execute(
+            skill_name="test_skill",
+            code="print('Test output')\nprint(2 + 2)"
+        )
+        assert result['success'], "TestTool should succeed with valid code"
+        assert "Test output" in result['output'], "Should capture output"
+        print("✓ TestTool executes code")
+        
+        # Test 3: TestTool with failure
+        result = test_tool.execute(
+            skill_name="test_fail",
+            code="raise ValueError('Test error')"
+        )
+        assert not result['success'], "TestTool should fail with error"
+        assert "ValueError" in result['error'], "Should capture error"
+        print("✓ TestTool handles failures")
+        
+        # Test 4: MemoryTool
+        mem_tool = MemoryTool(memory)
+        result = mem_tool.execute(
+            operation="add_skill",
+            skill_name="tool_test",
+            description="Test skill",
+            status="working"
+        )
+        assert result['success'], "MemoryTool should add skill"
+        print("✓ MemoryTool adds skills")
+        
+        # Test 5: MemoryTool get_memory
+        result = mem_tool.execute(operation="get_memory")
+        assert result['success'], "MemoryTool should get memory"
+        assert 'data' in result, "Should return memory data"
+        assert len(result['data']['skills']) == 1, "Should have 1 skill"
+        print("✓ MemoryTool retrieves memory")
+        
+        print("\n✅ Tool System: ALL TESTS PASSED")
+        
+        # Cleanup test files
+        test_file = WORKSPACE_ROOT / "skills" / "test_skill.py"
+        if test_file.exists():
+            test_file.unlink()
+
+
+def test_agent_initialization():
+    """Test agent initialization with different modes."""
+    print("\n" + "="*70)
+    print("TEST: Agent Initialization")
+    print("="*70)
+    
+    # Test 1: Default mode (llm-central)
+    agent = AutonomousAgent()
+    assert agent.mode == "llm-central", "Default mode should be llm-central"
+    print("✓ Default mode is llm-central")
+    
+    # Test 2: Explicit llm-central mode
+    agent = AutonomousAgent(mode="llm-central")
+    assert agent.mode == "llm-central"
+    assert agent.tools is not None, "Tools should be initialized"
+    assert agent.controller is not None, "Controller should be initialized"
+    print("✓ LLM-central mode initializes correctly")
+    
+    # Test 3: Graph mode
+    agent = AutonomousAgent(mode="graph")
+    assert agent.mode == "graph"
+    assert agent.tools is not None, "Tools should still be initialized"
+    print("✓ Graph mode initializes correctly")
+    
+    # Test 4: Tools are present
+    assert "plan_skill" in agent.tools
+    assert "write_skill" in agent.tools
+    assert "test_skill" in agent.tools
+    assert "analyze_results" in agent.tools
+    assert "memory_ops" in agent.tools
+    print("✓ All required tools present")
+    
+    print("\n✅ Agent Initialization: ALL TESTS PASSED")
+
+
+def test_mode_switching():
+    """Test runtime mode switching."""
+    print("\n" + "="*70)
+    print("TEST: Mode Switching")
+    print("="*70)
+    
+    # Create agent
+    agent = AutonomousAgent(mode="llm-central")
+    
+    # Test 1: Initial mode
+    assert agent.mode == "llm-central"
+    print("✓ Initial mode is llm-central")
+    
+    # Test 2: Switch to graph mode
+    agent.mode = "graph"
+    assert agent.mode == "graph"
+    print("✓ Can switch to graph mode")
+    
+    # Test 3: Switch back to llm-central
+    agent.mode = "llm-central"
+    assert agent.mode == "llm-central"
+    print("✓ Can switch back to llm-central mode")
+    
+    print("\n✅ Mode Switching: ALL TESTS PASSED")
+
+
 def run_all_tests():
     """Run all test suites."""
     print("""
@@ -303,6 +449,9 @@ def run_all_tests():
         ("Persistent Memory", test_persistent_memory),
         ("Python Executor", test_python_executor),
         ("Dangerous Patterns", test_dangerous_patterns),
+        ("Tool System", test_tool_system),
+        ("Agent Initialization", test_agent_initialization),
+        ("Mode Switching", test_mode_switching),
     ]
     
     passed = 0
