@@ -1,0 +1,18 @@
+# Autonomous Agent Requirements
+# Ubuntu 24.04, Python 3.11+
+
+# LangGraph 0.3.x (with START/END constants)
+langgraph>=0.3.0,<0.4.0
+
+# Ollama integration (compatible versions)
+langchain-ollama>=0.2.0
+ollama>=0.5.3
+
+# Pydantic for data validation
+pydantic>=2.5.0,<3.0.0
+
+# Optional: File monitoring
+watchdog==3.0.0
+
+# langchain-core will be auto-resolved by pip (needs >=0.3.76)
+# DO NOT pin it manually - let pip handle dependency resolution
