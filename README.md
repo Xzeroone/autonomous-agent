@@ -1,95 +1,65 @@
 # Autonomous Self-Improving Agent
 
-Production-ready autonomous agent built with **LangGraph** + **Ollama** for Ubuntu 24.04. Features tiered autonomy, persistent memory, and self-improvement through iterative skill development.
+Production-ready autonomous agent built with **Ollama** for Ubuntu 24.04. Features **LLM-driven autonomy**, tiered safety, persistent memory, and self-improvement through iterative skill development.
 
 ## 🎯 Key Features
 
-- **🤖 Full Autonomy**: Operates independently within workspace (no human approval needed)
+- **🧠 LLM as Brain**: LLM decides all actions dynamically (llm-central mode, default)
+- **📊 LangGraph as Tool**: Graph-based workflow coordination available when needed
+- **🔄 Dual Modes**: Switch between LLM-central (autonomous) and graph (structured) modes
 - **🛡️ Tiered Safety**: Requires approval for system-level operations
 - **🧠 Persistent Memory**: OpenCLAW-style JSON memory survives restarts
 - **🔄 Self-Improvement Loop**: Learns from failures, iterates until success
-- **🏗️ LangGraph 0.3.x**: State machine with proper START/END handling
 - **⚡ Ollama-Powered**: Local LLM inference with qwen3-coder or glm-4.7-flash
 
-## 🚀 Quick Start
+## 🏗️ Architecture Philosophy
 
-```bash
-# 1. Clone/download the files
-cd autonomous-agent/
+### The Agent as an Organism
 
-# 2. Run automated setup
-./setup.sh
+This agent is designed with a biological metaphor:
 
-# 3. Activate environment
-source venv/bin/activate
+- **🧠 LLM = Brain**: The central controller that makes all decisions, evaluates context, and chooses actions
+- **🕸️ LangGraph = Nervous System**: Coordination system the brain can use when structured workflows are needed
+- **🔧 Tools = Body Parts**: Extensible tools (plan, write, test, analyze, memory) the brain controls
+- **🛡️ Safety System = Immune System**: Protects against harmful operations
+- **💾 Memory = Long-term Storage**: Persistent knowledge that survives restarts
 
-# 4. Start the agent
-python3 autonomous_agent.py
-```
+### Two Operating Modes
 
-> **Note**: The default model is `qwen3-coder`. For faster performance or limited resources, see [MODEL_GUIDE.md](MODEL_GUIDE.md) to switch to `glm-4.7-flash`.
-
-## 📋 Prerequisites
-
-- **OS**: Ubuntu 24.04 LTS
-- **Python**: 3.11+
-- **RAM**: 4GB+ recommended
-- **Disk**: 10GB+ free space
-
-## 🎮 Usage Examples
-
-### Interactive Mode
-```bash
-$ python3 autonomous_agent.py
-
-Agent> :directive Create a JSON validator skill
-🧠 PLANNING: Create a JSON validator skill
-📝 WRITING: json_validator.py
-🧪 TESTING: json_validator
-✅ SUCCESS: Skill json_validator is working!
-
-Agent> :skills
-Skills (1):
-  ✅ json_validator: Create a JSON validator skill
-
-Agent> :memory
-{
-  "version": 2,
-  "skills": [...],
-  "failures": [],
-  "directives": [...]
-}
-```
-
-### Programmatic Usage
-```python
-from autonomous_agent import AutonomousAgent
-
-agent = AutonomousAgent()
-agent.run(
-    goal="Create a CSV to JSON converter",
-    skill_name="csv_converter"
-)
-```
-
-### Batch Processing
-```python
-goals = [
-    "Create a base64 encoder",
-    "Create a regex pattern matcher",
-    "Create a URL parser"
-]
-
-agent = AutonomousAgent()
-for goal in goals:
-    agent.run(goal)
-```
-
-## 🏗️ Architecture
-
+#### 1. LLM-Central Mode (Default) - **Autonomous Brain**
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    LANGGRAPH WORKFLOW                    │
+│                      LLM BRAIN                           │
+│              (Decision-Making Controller)                │
+└─────────────────┬───────────────────────────────────────┘
+                  │ Evaluates context, decides actions
+                  ▼
+    ┌─────────────────────────────────────────────┐
+    │         AVAILABLE TOOLS                      │
+    ├─────────────────────────────────────────────┤
+    │  • plan_skill    - Generate code            │
+    │  • write_skill   - Save to file             │
+    │  • test_skill    - Execute & validate       │
+    │  • analyze_results - Evaluate success       │
+    │  • memory_ops    - Read/write memory        │
+    │  • LangGraph     - Structured coordination  │
+    └─────────────────────────────────────────────┘
+
+Flow: LLM → Decide → Tool → Result → LLM → Decide → ...
+```
+
+The LLM receives the goal, current state, and available tools, then decides what to do next. It can:
+- Plan and generate code
+- Write skills to files
+- Test code execution
+- Analyze results
+- Manage memory
+- Even invoke LangGraph for structured sub-workflows if needed
+
+#### 2. Graph Mode (Legacy) - **Structured Workflow**
+```
+┌─────────────────────────────────────────────────────────┐
+│                   LANGGRAPH WORKFLOW                     │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
 │  START ──▶ PLAN ──▶ WRITE ──▶ TEST ──▶ ANALYZE        │
@@ -108,39 +78,158 @@ for goal in goals:
 │                                                  END     │
 └─────────────────────────────────────────────────────────┘
 
-                    ▼ INTERACTS WITH ▼
+Flow: Fixed graph path with conditional loops
+```
 
-┌─────────────────────────────────────────────────────────┐
-│                   CORE COMPONENTS                        │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌─────────────────┐  ┌──────────────────┐            │
-│  │ Persistent      │  │ Safety           │            │
-│  │ Memory          │  │ Enforcer         │            │
-│  │ (memory.json)   │  │ (Tiered Autonomy)│            │
-│  └─────────────────┘  └──────────────────┘            │
-│                                                          │
-│  ┌─────────────────┐  ┌──────────────────┐            │
-│  │ Python          │  │ Ollama LLM       │            │
-│  │ Executor        │  │ (qwen3-coder)    │            │
-│  │ (Sandboxed)     │  │                  │            │
-│  └─────────────────┘  └──────────────────┘            │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+Fixed workflow orchestrated by LangGraph. Each step is predetermined, but the LLM is invoked within each node for specific tasks.
 
-                    ▼ OPERATES IN ▼
+## 🚀 Quick Start
 
-┌─────────────────────────────────────────────────────────┐
-│                ISOLATED WORKSPACE                        │
-├─────────────────────────────────────────────────────────┤
-│  agent_workspace/                                        │
-│  ├── memory.json         (persistent state)             │
-│  ├── skills/             (generated .py files)          │
-│  │   ├── json_validator.py                             │
-│  │   ├── csv_parser.py                                 │
-│  │   └── ...                                            │
-│  └── exec/               (temp execution, auto-clean)   │
-└─────────────────────────────────────────────────────────┘
+```bash
+# 1. Clone/download the files
+cd autonomous-agent/
+
+# 2. Run automated setup
+./setup.sh
+
+# 3. Activate environment
+source venv/bin/activate
+
+# 4. Start the agent (LLM-central mode by default)
+python3 autonomous_agent.py
+
+# OR use legacy graph mode
+python3 autonomous_agent.py --graph
+```
+
+> **Note**: The default model is `qwen3-coder`. For faster performance or limited resources, see [MODEL_GUIDE.md](MODEL_GUIDE.md) to switch to `glm-4.7-flash`.
+
+## 📋 Prerequisites
+
+- **OS**: Ubuntu 24.04 LTS
+- **Python**: 3.11+
+- **RAM**: 4GB+ recommended
+- **Disk**: 10GB+ free space
+
+## 🎮 Usage Examples
+
+### Interactive Mode (LLM-Central)
+```bash
+$ python3 autonomous_agent.py
+
+Agent> :directive Create a JSON validator skill
+🧠 LLM-CENTRAL MODE: LLM is the brain, deciding all actions
+🔄 Iteration 1/12
+──────────────────────────────────────────────────────────────────
+💭 DECISION: Need to generate code for JSON validator
+⚡ ACTION: plan_skill
+🔧 Executing tool: plan_skill
+✓ Generated code (542 chars)
+...
+✅ SUCCESS: Skill json_validator is working!
+
+Agent> :skills
+Skills (1):
+  ✅ json_validator: Create a JSON validator skill
+
+Agent> :mode graph       # Switch to graph mode
+✓ Switched to graph mode
+
+Agent> :directive Create a CSV parser
+📊 GRAPH MODE: LangGraph orchestrates fixed workflow
+🧠 PLANNING: Create a CSV parser
+...
+```
+
+### Command-Line Mode Selection
+```bash
+# LLM-central mode (default)
+python3 autonomous_agent.py
+
+# Graph mode (legacy)
+python3 autonomous_agent.py --graph
+
+# Explicit mode selection
+python3 autonomous_agent.py --mode llm-central
+python3 autonomous_agent.py --mode graph
+```
+
+### Programmatic Usage
+```python
+from autonomous_agent import AutonomousAgent
+
+# LLM-central mode (default)
+agent = AutonomousAgent(mode="llm-central")
+agent.run(
+    goal="Create a CSV to JSON converter",
+    skill_name="csv_converter"
+)
+
+# Graph mode (legacy)
+agent_graph = AutonomousAgent(mode="graph")
+agent_graph.run(
+    goal="Create a base64 encoder",
+    skill_name="base64_encoder"
+)
+```
+
+### Batch Processing
+```python
+goals = [
+    "Create a base64 encoder",
+    "Create a regex pattern matcher",
+    "Create a URL parser"
+]
+
+agent = AutonomousAgent(mode="llm-central")
+for goal in goals:
+    agent.run(goal)
+```
+
+## ⚙️ Configuration & Modes
+
+### Agent Modes
+
+Edit constants in `autonomous_agent.py`:
+
+```python
+WORKSPACE_ROOT = Path("./agent_workspace").resolve()
+OLLAMA_MODEL = "qwen3-coder"      # Or "glm-4.7-flash"
+MAX_ITERATIONS = 12               # Max retries per skill
+EXECUTION_TIMEOUT = 15            # Seconds
+AGENT_MODE = "llm-central"        # Options: "llm-central" or "graph"
+```
+
+### Mode Comparison
+
+| Feature | LLM-Central Mode | Graph Mode |
+|---------|-----------------|------------|
+| **Decision Making** | LLM chooses all actions dynamically | Fixed workflow graph |
+| **Flexibility** | High - can adapt flow based on context | Low - predetermined path |
+| **Autonomy** | True autonomous reasoning | Structured automation |
+| **When to Use** | Complex tasks, exploratory work | Well-defined workflows |
+| **Performance** | Slightly more LLM calls | Fewer, more targeted LLM calls |
+| **Innovation** | Can discover novel approaches | Follows proven path |
+
+### Switching Modes
+
+**Command Line:**
+```bash
+python3 autonomous_agent.py --llm-central  # Default
+python3 autonomous_agent.py --graph        # Legacy mode
+```
+
+**Interactive:**
+```bash
+Agent> :mode llm-central
+✓ Switched to llm-central mode
+Agent> :mode graph
+✓ Switched to graph mode
+```
+
+**Programmatic:**
+```python
+agent = AutonomousAgent(mode="llm-central")  # or "graph"
 ```
 
 ## 🔒 Safety System
@@ -204,17 +293,6 @@ for goal in goals:
 - `untested` - Created but not validated
 - `failed` - Max iterations reached without success
 
-## 🔧 Configuration
-
-Edit constants in `autonomous_agent.py`:
-
-```python
-WORKSPACE_ROOT = Path("./agent_workspace").resolve()
-OLLAMA_MODEL = "qwen3-coder"      # Or "glm-4.7-flash"
-MAX_ITERATIONS = 12               # Max retries per skill
-EXECUTION_TIMEOUT = 15            # Seconds
-```
-
 ### Supported Models
 - **qwen3-coder** (default): Optimized for code generation, 32K context
 - **glm-4.7-flash**: Fast and efficient, 8K context, good for simpler tasks
@@ -273,17 +351,27 @@ autonomous-agent/
 
 ## 🎯 Use Cases
 
+### LLM-Central Mode (Best For)
+1. **Complex Problem Solving**: Tasks requiring adaptive decision-making
+2. **Exploratory Development**: When the solution approach is unclear
+3. **Self-Directed Learning**: Agent discovers optimal workflow
+4. **Research & Experimentation**: Testing novel approaches
+5. **True Autonomy**: Minimal human intervention needed
+
+### Graph Mode (Best For)
 1. **Rapid Prototyping**: Generate utility functions on-demand
-2. **Code Learning**: Watch the agent iterate and improve
+2. **Predictable Workflows**: When you know the exact steps needed
 3. **Testing Automation**: Create test harnesses automatically
 4. **Data Processing**: Build custom parsers and validators
-5. **Educational Tool**: Study LLM-based code generation
+5. **Educational Tool**: Study LLM-based code generation in structured flow
 
 ## ⚙️ Technical Stack
 
-- **LangGraph 0.3.x**: State machine orchestration
+- **LLM Brain**: Primary decision-maker (LLM-central mode)
+- **LangGraph 0.3.x**: Optional workflow orchestration tool
 - **Ollama**: Local LLM inference
 - **qwen3-coder / glm-4.7-flash**: Code-specialized models
+- **Tool System**: Extensible architecture for adding capabilities
 - **Python 3.11+**: Runtime environment
 - **Ubuntu 24.04**: Target platform
 
@@ -305,6 +393,16 @@ autonomous-agent/
 
 ## 🛣️ Roadmap
 
+### Completed ✅
+- [x] LLM-central mode (LLM as brain/decision-maker)
+- [x] Tool system architecture
+- [x] Backward compatibility (graph mode)
+- [x] Mode switching (runtime + CLI)
+- [x] Dynamic action selection by LLM
+
+### Planned 🔮
+- [ ] Additional tools (file operations, search, refactoring)
+- [ ] LangGraph invocation as a tool (sub-workflow delegation)
 - [ ] Multi-file skill support
 - [ ] Skill dependency management
 - [ ] Interactive approval workflow for system ops
@@ -313,6 +411,7 @@ autonomous-agent/
 - [ ] Remote model support (OpenAI, Anthropic)
 - [ ] Parallel skill development
 - [ ] Web UI dashboard
+- [ ] Meta-learning (agent improves its own decision-making)
 
 ## 📄 License
 
