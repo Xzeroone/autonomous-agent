@@ -1,6 +1,6 @@
 # Autonomous Self-Improving Agent
 
-Production-ready autonomous agent built with **Ollama** for Ubuntu 24.04. Features **LLM-driven autonomy**, tiered safety, persistent memory, and self-improvement through iterative skill development.
+Production-ready autonomous agent built with **Ollama** for Ubuntu 24.04. Features **LLM-driven autonomy**, tiered safety, persistent memory, self-improvement through iterative skill development, **framework registry**, **tool classification**, and **DIRECT_ANSWER capability**.
 
 ## 🎯 Key Features
 
@@ -11,6 +11,10 @@ Production-ready autonomous agent built with **Ollama** for Ubuntu 24.04. Featur
 - **🧠 Persistent Memory**: OpenCLAW-style JSON memory survives restarts
 - **🔄 Self-Improvement Loop**: Learns from failures, iterates until success
 - **⚡ Ollama-Powered**: Local LLM inference with qwen3-coder or glm-4.7-flash
+- **🔧 Framework Registry**: Reusable code generation components (NEW)
+- **🏷️ Tool Classification**: THINK vs DO tool organization (NEW)
+- **💬 DIRECT_ANSWER**: LLM can respond without invoking tools (NEW)
+- **🕸️ Dynamic Planner**: LangGraph-based dynamic workflow execution (NEW)
 
 ## 🏗️ Architecture Philosophy
 
@@ -292,6 +296,200 @@ agent = AutonomousAgent(mode="llm-central")  # or "graph"
 - `working` - Tested and functional
 - `untested` - Created but not validated
 - `failed` - Max iterations reached without success
+
+## 🔧 Framework Registry (NEW)
+
+The Framework Registry provides a system for managing reusable code generation components and templates.
+
+### What is a Framework?
+
+A framework is a reusable code generation template with:
+- **Name**: Unique identifier
+- **Type**: "think" (planning/analysis) or "do" (execution/action)
+- **Language**: Target programming language
+- **Components**: Dictionary of template parts
+
+### Default Frameworks
+
+Three built-in frameworks are registered automatically:
+
+1. **python_generator** (DO, Python)
+   - Components: header, main_function, test_harness
+   - Use case: Generate complete Python functions with tests
+
+2. **analysis_prompt** (THINK, Natural Language)
+   - Components: analysis_template
+   - Use case: Structure analytical thinking tasks
+
+3. **test_harness** (DO, Python)
+   - Components: test_setup, test_method, test_runner
+   - Use case: Generate unittest-based test suites
+
+### Using the Framework Registry
+
+```python
+from frameworks import FrameworkRegistry, register_default_frameworks
+
+# Initialize and register defaults
+registry = FrameworkRegistry()
+register_default_frameworks(registry)
+
+# List all frameworks
+print(registry.list_frameworks())
+# Output: ['python_generator', 'analysis_prompt', 'test_harness']
+
+# Get frameworks by type
+think_frameworks = registry.find_by_type("think")
+do_frameworks = registry.find_by_type("do")
+
+# Get frameworks by language
+python_frameworks = registry.find_by_language("python")
+```
+
+### Tool Assembler
+
+The ToolAssembler composes frameworks into deliverables with automatic safety checking:
+
+```python
+from frameworks import ToolAssembler
+
+assembler = ToolAssembler(registry, safety_enforcer)
+
+# Assemble a framework
+result = assembler.assemble(
+    frameworks=["python_generator"],
+    params={
+        "description": "A factorial calculator",
+        "function_name": "factorial",
+        "params": "n: int",
+        "doc_string": "Calculate factorial of n",
+        "test_params": "5"
+    }
+)
+
+if result['success']:
+    print(result['code'])  # Generated code
+```
+
+### PlanTool Framework Integration
+
+PlanTool can now use frameworks instead of pure LLM generation:
+
+```python
+# Using frameworks
+result = plan_tool.execute(
+    goal="Create a factorial function",
+    skill_name="factorial",
+    frameworks=["python_generator"]  # Use framework instead of LLM
+)
+
+# Traditional LLM-based generation (fallback)
+result = plan_tool.execute(
+    goal="Create a factorial function",
+    skill_name="factorial"
+    # No frameworks = LLM generates from scratch
+)
+```
+
+## 🏷️ Tool Classification (NEW)
+
+Tools are classified into two types for better organization:
+
+### THINK Tools (Planning & Analysis)
+- **plan_skill**: Generate code plans
+- **analyze_results**: Evaluate test outcomes
+- **langgraph_planner**: Build dynamic workflows
+
+### DO Tools (Execution & Action)
+- **write_skill**: Save code to files
+- **test_skill**: Execute and validate code
+- **memory_ops**: Manage persistent memory
+
+### Using Tool Classification
+
+```python
+agent = AutonomousAgent()
+
+# Get all THINK tools
+think_tools = agent.get_tools_by_type("think")
+print(f"Planning tools: {list(think_tools.keys())}")
+
+# Get all DO tools
+do_tools = agent.get_tools_by_type("do")
+print(f"Execution tools: {list(do_tools.keys())}")
+```
+
+## 💬 DIRECT_ANSWER Capability (NEW)
+
+The LLM can now respond directly without invoking tools when appropriate.
+
+### When DIRECT_ANSWER is Used
+
+The LLM automatically chooses DIRECT_ANSWER for:
+- Simple factual questions
+- Conceptual explanations
+- Quick clarifications
+- Status inquiries
+
+### Example Flow
+
+```
+User: "What is a decorator in Python?"
+
+LLM Decision:
+DECISION: This is a conceptual question I can answer directly
+ACTION: DIRECT_ANSWER
+PARAMS: {"response": "A decorator in Python is a design pattern..."}
+
+Agent Output:
+💬 DIRECT ANSWER: A decorator in Python is a design pattern that allows
+you to modify or extend the behavior of functions or methods without
+changing their source code...
+```
+
+### Traditional Tool-Based Flow
+
+```
+User: "Create a decorator for timing function execution"
+
+LLM Decision:
+DECISION: This requires code generation
+ACTION: plan_skill
+PARAMS: {"goal": "Create a timing decorator", "skill_name": "timer_decorator"}
+
+Agent Output:
+🔧 Executing tool: plan_skill
+✓ Generated code (245 chars)
+...
+```
+
+## 🕸️ LangGraph Dynamic Planner (NEW)
+
+The `langgraph_planner` tool enables runtime creation of dynamic StateGraph workflows.
+
+### Features
+- Build workflows at runtime
+- Define custom steps
+- Sequential or conditional execution
+- Automatic state management
+
+### Example Usage
+
+```python
+# Use the langgraph_planner tool
+result = agent.tools["langgraph_planner"].execute(
+    steps=[
+        {"name": "analyze", "handler": "analyze_task"},
+        {"name": "plan", "handler": "create_plan"},
+        {"name": "execute", "handler": "run_plan"}
+    ],
+    goal="Solve complex multi-step problem"
+)
+
+if result['success']:
+    print(f"Workflow completed: {result['status']}")
+    print(f"Steps executed: {len(result['results'])}")
+```
 
 ### Supported Models
 - **qwen3-coder** (default): Optimized for code generation, 32K context

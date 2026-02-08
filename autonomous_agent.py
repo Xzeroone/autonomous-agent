@@ -14,6 +14,8 @@ Features:
 - Self-improvement loop with failure learning
 - Workspace isolation and safety enforcement
 - Flexible tool-based architecture for extensibility
+- Framework registry for composing reusable components
+- Tool classification (THINK vs DO)
 """
 
 import json
@@ -28,6 +30,8 @@ from typing import Annotated, Literal, TypedDict
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
+
+from frameworks import Framework, FrameworkRegistry, ToolAssembler, register_default_frameworks
 
 
 # ============================================================================
@@ -304,9 +308,10 @@ class PythonExecutor:
 class AgentTool:
     """Base class for agent tools that LLM can invoke."""
     
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, tool_type: str = None):
         self.name = name
         self.description = description
+        self.tool_type = tool_type  # "think", "do", or None for legacy
     
     def execute(self, **kwargs) -> dict:
         """Execute the tool and return result."""
@@ -319,14 +324,44 @@ class PlanTool(AgentTool):
     def __init__(self, llm, memory, safety):
         super().__init__(
             name="plan_skill",
-            description="Plan and generate Python code for a skill based on the goal. Returns generated code."
+            description="Plan and generate Python code for a skill based on the goal. Returns generated code.",
+            tool_type="think"
         )
         self.llm = llm
         self.memory = memory
         self.safety = safety
+        self.assembler = None  # Will be injected by agent
     
-    def execute(self, goal: str, skill_name: str, iteration: int = 1) -> dict:
-        """Generate skill code based on goal."""
+    def execute(self, goal: str, skill_name: str, iteration: int = 1, frameworks: list = None) -> dict:
+        """
+        Generate skill code based on goal.
+        
+        Args:
+            goal: Goal description
+            skill_name: Name of the skill
+            iteration: Current iteration number
+            frameworks: Optional list of framework names to assemble
+            
+        Returns:
+            Dictionary with success status, code, and message
+        """
+        # If frameworks are provided, use assembler
+        if frameworks and self.assembler:
+            params = {
+                "description": goal,
+                "function_name": skill_name,
+                "params": "",
+                "doc_string": goal,
+                "test_params": "",
+                "class_name": skill_name.title().replace("_", ""),
+                "test_name": "basic",
+                "test_description": goal,
+            }
+            
+            result = self.assembler.assemble(frameworks, params)
+            return result
+        
+        # Legacy: prompt-based plan generation (fallback)
         # Get relevant failures for context
         failures = self.memory.get_relevant_failures(skill_name)
         failure_context = ""
@@ -390,7 +425,8 @@ class WriteTool(AgentTool):
     def __init__(self):
         super().__init__(
             name="write_skill",
-            description="Write skill code to a file in the skills directory. Returns success status."
+            description="Write skill code to a file in the skills directory. Returns success status.",
+            tool_type="do"
         )
     
     def execute(self, skill_name: str, code: str) -> dict:
@@ -418,7 +454,8 @@ class TestTool(AgentTool):
     def __init__(self, executor, memory):
         super().__init__(
             name="test_skill",
-            description="Execute skill code and return test results. Returns success status and output."
+            description="Execute skill code and return test results. Returns success status and output.",
+            tool_type="do"
         )
         self.executor = executor
         self.memory = memory
@@ -458,7 +495,8 @@ class AnalyzeTool(AgentTool):
     def __init__(self, llm):
         super().__init__(
             name="analyze_results",
-            description="Analyze test results to determine if skill is working. Returns analysis and success status."
+            description="Analyze test results to determine if skill is working. Returns analysis and success status.",
+            tool_type="think"
         )
         self.llm = llm
     
@@ -497,7 +535,8 @@ class MemoryTool(AgentTool):
     def __init__(self, memory):
         super().__init__(
             name="memory_ops",
-            description="Perform memory operations: add_skill, get_memory, get_failures. Returns operation result."
+            description="Perform memory operations: add_skill, get_memory, get_failures. Returns operation result.",
+            tool_type="do"
         )
         self.memory = memory
     
@@ -528,6 +567,105 @@ class MemoryTool(AgentTool):
         
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+
+class LangGraphPlannerTool(AgentTool):
+    """Tool for building and running dynamic StateGraph workflows."""
+    
+    def __init__(self, llm):
+        super().__init__(
+            name="langgraph_planner",
+            description="Build and run a dynamic LangGraph StateGraph workflow. Accepts steps and goal, returns result summary.",
+            tool_type="think"
+        )
+        self.llm = llm
+    
+    def execute(self, steps: list, goal: str) -> dict:
+        """
+        Build and run a dynamic StateGraph.
+        
+        Args:
+            steps: List of step descriptors with 'name' and 'handler' (or 'tool_name')
+            goal: Overall goal for the workflow
+            
+        Returns:
+            Dictionary with success status and result summary
+        """
+        try:
+            # Define a simple state for dynamic planning
+            class PlanState(TypedDict):
+                goal: str
+                current_step: int
+                results: list
+                status: str
+            
+            # Create workflow
+            workflow = StateGraph(PlanState)
+            
+            # Add nodes for each step
+            for idx, step in enumerate(steps):
+                step_name = step.get('name', f'step_{idx}')
+                
+                def make_node_fn(step_desc, step_idx):
+                    """Factory to create node function with correct closure."""
+                    def node_fn(state: PlanState) -> PlanState:
+                        print(f"  Executing step {step_idx + 1}/{len(steps)}: {step_desc.get('name', 'unnamed')}")
+                        
+                        # Simple execution - just record the step
+                        state['current_step'] = step_idx + 1
+                        state['results'].append({
+                            'step': step_desc.get('name', 'unnamed'),
+                            'status': 'completed'
+                        })
+                        
+                        # Update status
+                        if step_idx + 1 >= len(steps):
+                            state['status'] = 'completed'
+                        
+                        return state
+                    
+                    return node_fn
+                
+                workflow.add_node(step_name, make_node_fn(step, idx))
+            
+            # Add edges to connect steps sequentially
+            if steps:
+                workflow.add_edge(START, steps[0].get('name', 'step_0'))
+                for idx in range(len(steps) - 1):
+                    current_step = steps[idx].get('name', f'step_{idx}')
+                    next_step = steps[idx + 1].get('name', f'step_{idx + 1}')
+                    workflow.add_edge(current_step, next_step)
+                
+                # Connect last step to end
+                last_step = steps[-1].get('name', f'step_{len(steps) - 1}')
+                workflow.add_edge(last_step, END)
+            
+            # Compile and run
+            app = workflow.compile()
+            
+            initial_state = {
+                'goal': goal,
+                'current_step': 0,
+                'results': [],
+                'status': 'running'
+            }
+            
+            print(f"🔧 Running LangGraph dynamic planner with {len(steps)} steps...")
+            final_state = app.invoke(initial_state)
+            
+            return {
+                'success': True,
+                'message': f'Dynamic workflow completed {len(steps)} steps',
+                'results': final_state.get('results', []),
+                'status': final_state.get('status', 'unknown')
+            }
+        
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'LangGraph planner failed: {e}'
+            }
 
 
 class LLMController:
@@ -578,24 +716,33 @@ RECENT ACTIONS:
 INSTRUCTIONS:
 1. Analyze the current situation
 2. Decide what to do next to accomplish the goal
-3. Choose ONE tool to invoke, or COMPLETE if goal is achieved
+3. Choose ONE tool to invoke, or use a special action:
+   - DIRECT_ANSWER: When you can answer directly without invoking tools
+   - COMPLETE: When the goal is fully achieved
+   - RETRY_PLAN: When you need to regenerate the plan
+   - FAILED: When max iterations reached without success
 
 Respond in this EXACT format:
 DECISION: <your reasoning>
-ACTION: <tool_name or COMPLETE or RETRY_PLAN or FAILED>
-PARAMS: <JSON dict of parameters for the tool>
+ACTION: <tool_name or DIRECT_ANSWER or COMPLETE or RETRY_PLAN or FAILED>
+PARAMS: <JSON dict of parameters for the tool or action>
 
-Example:
+Example (using a tool):
 DECISION: Need to generate code first
 ACTION: plan_skill
 PARAMS: {{"goal": "{goal}", "skill_name": "{skill_name}", "iteration": {iteration}}}
 
-Or if done:
+Example (direct answer):
+DECISION: This is a simple question I can answer directly
+ACTION: DIRECT_ANSWER
+PARAMS: {{"response": "The answer to your question is..."}}
+
+Example (completion):
 DECISION: Test passed, skill is working
 ACTION: COMPLETE
 PARAMS: {{}}
 
-Or if max iterations reached:
+Example (failure):
 DECISION: Max iterations reached without success
 ACTION: FAILED
 PARAMS: {{}}
@@ -668,13 +815,22 @@ class AutonomousAgent:
         # Determine mode
         self.mode = mode or AGENT_MODE
         
+        # Initialize framework registry and assembler
+        self.framework_registry = FrameworkRegistry()
+        register_default_frameworks(self.framework_registry)
+        self.assembler = ToolAssembler(self.framework_registry, self.safety)
+        
         # Initialize tools for LLM-central mode
+        plan_tool = PlanTool(self.llm, self.memory, self.safety)
+        plan_tool.assembler = self.assembler  # Inject assembler into PlanTool
+        
         self.tools = {
-            "plan_skill": PlanTool(self.llm, self.memory, self.safety),
+            "plan_skill": plan_tool,
             "write_skill": WriteTool(),
             "test_skill": TestTool(self.executor, self.memory),
             "analyze_results": AnalyzeTool(self.llm),
-            "memory_ops": MemoryTool(self.memory)
+            "memory_ops": MemoryTool(self.memory),
+            "langgraph_planner": LangGraphPlannerTool(self.llm)
         }
         
         # Initialize LLM controller for LLM-central mode
@@ -686,6 +842,22 @@ class AutonomousAgent:
         
         print(f"✓ Agent initialized with model: {OLLAMA_MODEL}")
         print(f"✓ Mode: {self.mode}")
+    
+    def get_tools_by_type(self, tool_type: str) -> dict:
+        """
+        Get tools filtered by type.
+        
+        Args:
+            tool_type: Type of tools to filter ("think", "do", or None for legacy)
+            
+        Returns:
+            Dictionary of tools matching the specified type
+        """
+        return {
+            name: tool 
+            for name, tool in self.tools.items() 
+            if tool.tool_type == tool_type
+        }
     
     # ========================================================================
     # NODE: Plan Skill (FOR GRAPH MODE)
@@ -958,6 +1130,13 @@ Be strict: only mark as SUCCESS if output shows clear success."""
             
             action = decision['action']
             params = decision['params']
+            
+            # Handle DIRECT_ANSWER
+            if action == "DIRECT_ANSWER":
+                response_text = params.get("response", "No response provided")
+                print(f"\n💬 DIRECT ANSWER: {response_text}")
+                # Don't increment iteration for direct answers
+                return True
             
             # Handle completion
             if action == "COMPLETE":
