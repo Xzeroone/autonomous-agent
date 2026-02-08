@@ -14,6 +14,8 @@ Features:
 - Self-improvement loop with failure learning
 - Workspace isolation and safety enforcement
 - Flexible tool-based architecture for extensibility
+- Framework registry for composing reusable components
+- Tool classification (THINK vs DO)
 """
 
 import json
@@ -28,6 +30,8 @@ from typing import Annotated, Literal, TypedDict
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
+
+from frameworks import Framework, FrameworkRegistry, ToolAssembler, register_default_frameworks
 
 
 # ============================================================================
@@ -326,9 +330,38 @@ class PlanTool(AgentTool):
         self.llm = llm
         self.memory = memory
         self.safety = safety
+        self.assembler = None  # Will be injected by agent
     
-    def execute(self, goal: str, skill_name: str, iteration: int = 1) -> dict:
-        """Generate skill code based on goal."""
+    def execute(self, goal: str, skill_name: str, iteration: int = 1, frameworks: list = None) -> dict:
+        """
+        Generate skill code based on goal.
+        
+        Args:
+            goal: Goal description
+            skill_name: Name of the skill
+            iteration: Current iteration number
+            frameworks: Optional list of framework names to assemble
+            
+        Returns:
+            Dictionary with success status, code, and message
+        """
+        # If frameworks are provided, use assembler
+        if frameworks and self.assembler:
+            params = {
+                "description": goal,
+                "function_name": skill_name,
+                "params": "",
+                "doc_string": goal,
+                "test_params": "",
+                "class_name": skill_name.title().replace("_", ""),
+                "test_name": "basic",
+                "test_description": goal,
+            }
+            
+            result = self.assembler.assemble(frameworks, params)
+            return result
+        
+        # Legacy: prompt-based plan generation (fallback)
         # Get relevant failures for context
         failures = self.memory.get_relevant_failures(skill_name)
         failure_context = ""
@@ -674,9 +707,17 @@ class AutonomousAgent:
         # Determine mode
         self.mode = mode or AGENT_MODE
         
+        # Initialize framework registry and assembler
+        self.framework_registry = FrameworkRegistry()
+        register_default_frameworks(self.framework_registry)
+        self.assembler = ToolAssembler(self.framework_registry, self.safety)
+        
         # Initialize tools for LLM-central mode
+        plan_tool = PlanTool(self.llm, self.memory, self.safety)
+        plan_tool.assembler = self.assembler  # Inject assembler into PlanTool
+        
         self.tools = {
-            "plan_skill": PlanTool(self.llm, self.memory, self.safety),
+            "plan_skill": plan_tool,
             "write_skill": WriteTool(),
             "test_skill": TestTool(self.executor, self.memory),
             "analyze_results": AnalyzeTool(self.llm),
