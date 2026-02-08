@@ -435,6 +435,215 @@ def test_mode_switching():
     print("\n✅ Mode Switching: ALL TESTS PASSED")
 
 
+def test_framework_registry():
+    """Test framework registry functionality."""
+    print("\n" + "="*70)
+    print("TEST: Framework Registry")
+    print("="*70)
+    
+    from frameworks import Framework, FrameworkRegistry, register_default_frameworks
+    
+    # Test 1: Registry initialization
+    registry = FrameworkRegistry()
+    assert len(registry.list_frameworks()) == 0, "Should start empty"
+    print("✓ Registry initializes empty")
+    
+    # Test 2: Register framework
+    test_fw = Framework(
+        name="test_framework",
+        type_="think",
+        language="python",
+        components={"main": "print('test')"}
+    )
+    registry.register(test_fw)
+    assert len(registry.list_frameworks()) == 1, "Should have 1 framework"
+    print("✓ Can register frameworks")
+    
+    # Test 3: Retrieve framework
+    retrieved = registry.get("test_framework")
+    assert retrieved is not None, "Should retrieve registered framework"
+    assert retrieved.name == "test_framework", "Should retrieve correct framework"
+    print("✓ Can retrieve frameworks")
+    
+    # Test 4: Find by type
+    think_frameworks = registry.find_by_type("think")
+    assert len(think_frameworks) == 1, "Should find 1 THINK framework"
+    assert think_frameworks[0].name == "test_framework"
+    print("✓ Can find frameworks by type")
+    
+    # Test 5: Register defaults
+    registry2 = FrameworkRegistry()
+    register_default_frameworks(registry2)
+    assert len(registry2.list_frameworks()) > 0, "Should register default frameworks"
+    print(f"✓ Registered {len(registry2.list_frameworks())} default frameworks")
+    
+    # Test 6: Find by language
+    python_frameworks = registry2.find_by_language("python")
+    assert len(python_frameworks) > 0, "Should find Python frameworks"
+    print(f"✓ Found {len(python_frameworks)} Python frameworks")
+    
+    print("\n✅ Framework Registry: ALL TESTS PASSED")
+
+
+def test_tool_assembler():
+    """Test tool assembler functionality."""
+    print("\n" + "="*70)
+    print("TEST: Tool Assembler")
+    print("="*70)
+    
+    from frameworks import Framework, FrameworkRegistry, ToolAssembler
+    from autonomous_agent import SafetyEnforcer, WORKSPACE_ROOT
+    
+    # Setup
+    registry = FrameworkRegistry()
+    safety = SafetyEnforcer(WORKSPACE_ROOT)
+    assembler = ToolAssembler(registry, safety)
+    
+    # Test 1: Assemble with no frameworks
+    result = assembler.assemble([], {})
+    assert not result['success'], "Should fail with no frameworks"
+    print("✓ Fails gracefully with no frameworks")
+    
+    # Test 2: Assemble with unknown framework
+    result = assembler.assemble(["unknown_framework"], {})
+    assert not result['success'], "Should fail with unknown framework"
+    assert "not found" in result['message'].lower()
+    print("✓ Fails with unknown framework")
+    
+    # Test 3: Assemble valid framework
+    test_fw = Framework(
+        name="simple_test",
+        type_="do",
+        language="python",
+        components={
+            "main": "def {function_name}():\n    return '{result}'"
+        }
+    )
+    registry.register(test_fw)
+    
+    params = {"function_name": "test_func", "result": "success"}
+    result = assembler.assemble(["simple_test"], params)
+    assert result['success'], f"Should assemble successfully: {result.get('error', '')}"
+    assert "test_func" in result['code'], "Should substitute parameters"
+    print("✓ Assembles valid framework with parameters")
+    
+    # Test 4: Safety check
+    unsafe_fw = Framework(
+        name="unsafe_test",
+        type_="do",
+        language="python",
+        components={
+            "main": "import os\nos.system('ls')"
+        }
+    )
+    registry.register(unsafe_fw)
+    
+    result = assembler.assemble(["unsafe_test"], {})
+    assert not result['success'], "Should fail safety check"
+    assert "safety" in result['message'].lower() or "safety" in result.get('error', '').lower()
+    print("✓ Enforces safety checks")
+    
+    print("\n✅ Tool Assembler: ALL TESTS PASSED")
+
+
+def test_tool_types():
+    """Test tool type classification."""
+    print("\n" + "="*70)
+    print("TEST: Tool Types")
+    print("="*70)
+    
+    from autonomous_agent import AutonomousAgent
+    
+    # Create agent
+    agent = AutonomousAgent()
+    
+    # Test 1: Check tool types are set
+    plan_tool = agent.tools.get("plan_skill")
+    assert plan_tool.tool_type == "think", "PlanTool should be THINK type"
+    print("✓ PlanTool is THINK type")
+    
+    write_tool = agent.tools.get("write_skill")
+    assert write_tool.tool_type == "do", "WriteTool should be DO type"
+    print("✓ WriteTool is DO type")
+    
+    test_tool = agent.tools.get("test_skill")
+    assert test_tool.tool_type == "do", "TestTool should be DO type"
+    print("✓ TestTool is DO type")
+    
+    analyze_tool = agent.tools.get("analyze_results")
+    assert analyze_tool.tool_type == "think", "AnalyzeTool should be THINK type"
+    print("✓ AnalyzeTool is THINK type")
+    
+    memory_tool = agent.tools.get("memory_ops")
+    assert memory_tool.tool_type == "do", "MemoryTool should be DO type"
+    print("✓ MemoryTool is DO type")
+    
+    langgraph_tool = agent.tools.get("langgraph_planner")
+    assert langgraph_tool.tool_type == "think", "LangGraphPlanner should be THINK type"
+    print("✓ LangGraphPlanner is THINK type")
+    
+    # Test 2: Get tools by type
+    think_tools = agent.get_tools_by_type("think")
+    assert len(think_tools) >= 2, "Should have at least 2 THINK tools"
+    assert "plan_skill" in think_tools
+    assert "analyze_results" in think_tools
+    print(f"✓ Found {len(think_tools)} THINK tools")
+    
+    do_tools = agent.get_tools_by_type("do")
+    assert len(do_tools) >= 3, "Should have at least 3 DO tools"
+    assert "write_skill" in do_tools
+    assert "test_skill" in do_tools
+    print(f"✓ Found {len(do_tools)} DO tools")
+    
+    print("\n✅ Tool Types: ALL TESTS PASSED")
+
+
+def test_direct_answer_parsing():
+    """Test DIRECT_ANSWER action parsing."""
+    print("\n" + "="*70)
+    print("TEST: DIRECT_ANSWER Parsing")
+    print("="*70)
+    
+    import re
+    import json
+    
+    # Test 1: Valid DIRECT_ANSWER response
+    test_response = """DECISION: This is a simple question I can answer directly
+ACTION: DIRECT_ANSWER
+PARAMS: {"response": "The answer is 42"}"""
+    
+    decision_match = re.search(r'DECISION:\s*(.+?)(?=\nACTION:)', test_response, re.DOTALL)
+    action_match = re.search(r'ACTION:\s*(\w+)', test_response)
+    params_match = re.search(r'PARAMS:\s*(\{.+\})', test_response, re.DOTALL)
+    
+    assert decision_match is not None, "Should parse decision"
+    assert action_match is not None, "Should parse action"
+    assert params_match is not None, "Should parse params"
+    
+    action = action_match.group(1).strip()
+    assert action == "DIRECT_ANSWER", "Should recognize DIRECT_ANSWER action"
+    print("✓ Parses DIRECT_ANSWER action")
+    
+    params_str = params_match.group(1).strip()
+    params_str = re.sub(r'\s+', ' ', params_str)
+    params = json.loads(params_str)
+    assert "response" in params, "Should have response in params"
+    assert params["response"] == "The answer is 42"
+    print("✓ Parses DIRECT_ANSWER params")
+    
+    # Test 2: Other action types still work
+    test_response2 = """DECISION: Need to plan the skill
+ACTION: plan_skill
+PARAMS: {"goal": "test", "skill_name": "test", "iteration": 1}"""
+    
+    action_match2 = re.search(r'ACTION:\s*(\w+)', test_response2)
+    action2 = action_match2.group(1).strip()
+    assert action2 == "plan_skill", "Should parse other actions"
+    print("✓ Other action types still parse correctly")
+    
+    print("\n✅ DIRECT_ANSWER Parsing: ALL TESTS PASSED")
+
+
 def run_all_tests():
     """Run all test suites."""
     print("""
@@ -452,6 +661,10 @@ def run_all_tests():
         ("Tool System", test_tool_system),
         ("Agent Initialization", test_agent_initialization),
         ("Mode Switching", test_mode_switching),
+        ("Framework Registry", test_framework_registry),
+        ("Tool Assembler", test_tool_assembler),
+        ("Tool Types", test_tool_types),
+        ("DIRECT_ANSWER Parsing", test_direct_answer_parsing),
     ]
     
     passed = 0
