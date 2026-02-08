@@ -617,24 +617,33 @@ RECENT ACTIONS:
 INSTRUCTIONS:
 1. Analyze the current situation
 2. Decide what to do next to accomplish the goal
-3. Choose ONE tool to invoke, or COMPLETE if goal is achieved
+3. Choose ONE tool to invoke, or use a special action:
+   - DIRECT_ANSWER: When you can answer directly without invoking tools
+   - COMPLETE: When the goal is fully achieved
+   - RETRY_PLAN: When you need to regenerate the plan
+   - FAILED: When max iterations reached without success
 
 Respond in this EXACT format:
 DECISION: <your reasoning>
-ACTION: <tool_name or COMPLETE or RETRY_PLAN or FAILED>
-PARAMS: <JSON dict of parameters for the tool>
+ACTION: <tool_name or DIRECT_ANSWER or COMPLETE or RETRY_PLAN or FAILED>
+PARAMS: <JSON dict of parameters for the tool or action>
 
-Example:
+Example (using a tool):
 DECISION: Need to generate code first
 ACTION: plan_skill
 PARAMS: {{"goal": "{goal}", "skill_name": "{skill_name}", "iteration": {iteration}}}
 
-Or if done:
+Example (direct answer):
+DECISION: This is a simple question I can answer directly
+ACTION: DIRECT_ANSWER
+PARAMS: {{"response": "The answer to your question is..."}}
+
+Example (completion):
 DECISION: Test passed, skill is working
 ACTION: COMPLETE
 PARAMS: {{}}
 
-Or if max iterations reached:
+Example (failure):
 DECISION: Max iterations reached without success
 ACTION: FAILED
 PARAMS: {{}}
@@ -1021,6 +1030,13 @@ Be strict: only mark as SUCCESS if output shows clear success."""
             
             action = decision['action']
             params = decision['params']
+            
+            # Handle DIRECT_ANSWER
+            if action == "DIRECT_ANSWER":
+                response_text = params.get("response", "No response provided")
+                print(f"\n💬 DIRECT ANSWER: {response_text}")
+                # Don't increment iteration for direct answers
+                return True
             
             # Handle completion
             if action == "COMPLETE":
