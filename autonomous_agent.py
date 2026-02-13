@@ -448,6 +448,11 @@ REQUIREMENTS:
 4. Make it production-ready and robust
 5. Avoid patterns from previous failures
 
+CRITICAL RULES:
+- NO input() calls - code must run without user interaction
+- In __main__, use hardcoded test values and print results
+- Example: if __name__ == "__main__": result = function(10); print(result)
+
 OUTPUT ONLY THE PYTHON CODE, nothing else. No markdown, no explanations."""
 
         messages = [SystemMessage(content=prompt)]
@@ -782,7 +787,8 @@ IMPORTANT:
 - First iteration: Always use plan_skill
 - After plan_skill: Use write_skill
 - After write_skill: Use test_skill
-- After test_skill passes: Use COMPLETE
+- If test_skill FAILS: Use plan_skill again to fix the code
+- After test_skill PASSES: Use COMPLETE
 - Never use DIRECT_ANSWER for coding tasks
 """
 
@@ -1170,19 +1176,65 @@ Be strict: only mark as SUCCESS if output shows clear success."""
             action = decision["action"]
             params = decision["params"]
 
-            # Force workflow progression for smaller models
-            # If we have code but haven't written it yet, force write_skill
-            if skill_code and not any(h["action"] == "write_skill" for h in history):
-                if action == "plan_skill":
-                    print("⚠️  Forcing write_skill (code already generated)")
-                    action = "write_skill"
-                    params = {"skill_name": skill_name, "code": skill_code}
+            # Smart workflow progression for smaller models
+            # Check if last test passed
+            last_test_passed = False
+            for h in reversed(history):
+                if h["action"] == "test_skill" and h.get("result", {}).get("success"):
+                    last_test_passed = True
+                    break
 
-            # If we wrote code but haven't tested it yet, force test_skill
-            if any(h["action"] == "write_skill" for h in history) and not any(
-                h["action"] == "test_skill" for h in history
-            ):
-                if action in ["plan_skill", "write_skill"]:
+            # If test passed, force COMPLETE
+            if last_test_passed and action != "COMPLETE":
+                print("⚠️  Forcing COMPLETE (test passed)")
+                action = "COMPLETE"
+                params = {}
+
+            # Track what's been done in this iteration cycle
+            else:
+                last_plan_idx = next(
+                    (
+                        i
+                        for i, h in reversed(
+                            list(enumerate(history))
+                            + [(len(history), {"action": None})]
+                        )
+                        if h["action"] == "plan_skill"
+                    ),
+                    -1,
+                )
+                last_write_idx = next(
+                    (
+                        i
+                        for i, h in reversed(
+                            list(enumerate(history))
+                            + [(len(history), {"action": None})]
+                        )
+                        if h["action"] == "write_skill"
+                    ),
+                    -1,
+                )
+                last_test_idx = next(
+                    (
+                        i
+                        for i, h in reversed(
+                            list(enumerate(history))
+                            + [(len(history), {"action": None})]
+                        )
+                        if h["action"] == "test_skill"
+                    ),
+                    -1,
+                )
+
+                # If we have new code from plan that hasn't been written, force write_skill
+                if skill_code and last_plan_idx > last_write_idx:
+                    if action != "write_skill":
+                        print("⚠️  Forcing write_skill (new code generated)")
+                        action = "write_skill"
+                        params = {"skill_name": skill_name, "code": skill_code}
+
+                # If we wrote code but haven't tested this write, force test_skill
+                elif last_write_idx > last_test_idx and last_write_idx >= 0:
                     print("⚠️  Forcing test_skill (code written but not tested)")
                     action = "test_skill"
                     params = {"skill_name": skill_name, "code": skill_code}
